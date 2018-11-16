@@ -32,6 +32,8 @@
 #' @param temp.dir  a temporary directory for the cluster-based analysis available on all nodes
 #' @param cleanup	if \code{TRUE} the temporary directory will be removed on completion
 #' @param verbosity verbosity level, \code{0} for the quiet execution 
+#' @param qsub_string Cluster submission string (4 positions for log file, job name, h, and mem_free)
+#' @param qstat_string Cluster status string (one position for job name)
 #' @param time.stamps add timestamps to the diagnostic output
 #' 
 #' @details 
@@ -66,6 +68,8 @@ runMeDeCom<-function(
 		temp.dir=NULL,
 		cleanup=TRUE,
 		verbosity=1L,
+        qsub_string="qsub -cwd -j y -o %s.log -b y -V -N %s -l h='%s' -l mem_free=%s",
+        qstat_string="qstat -r | grep \"Full jobname\" | grep -e %s",
 		time.stamps=FALSE
 ){
 	ts<-function(){
@@ -443,10 +447,11 @@ runMeDeCom<-function(
 			id<-attr(run_param_list[[idx]], "jname")
 			deps<-attr(run_param_list[[idx]], "depends_on")
 			submitClusterJob(id, deps, run_param_list[idx], WD, 
+                             qsub_string=qsub_string,
 					RDIR=cluster.settings$R_bin_dir, hosts=cluster.settings$host_pattern, ram_limit=cluster.settings$mem_limit)
 		}
 		
-		waitForClusterJobs(analysis.name, verbose=verbosity>0L)
+		waitForClusterJobs(analysis.name, qstat_string=qstat_string, verbose=verbosity>0L)
 		
 		for(idx in 1:length(result_list)){
 			if(!is.null(result_list[[idx]]) && file.exists(file.path(WD, result_list[[idx]]))){
@@ -661,7 +666,7 @@ runMeDeCom<-function(
 	MeDeComSet(result_object$parameters, result_object$outputs, dataset_info)
 }
 #######################################################################################################################
-submitClusterJob<-function(job_name, dependencies, params, WD, RDIR="/usr/bin", hosts="*", ram_limit="5G"){
+submitClusterJob<-function(job_name, dependencies, params, WD, qsub_string="qsub -cwd -j y -o %s.log -b y -V -N %s -l h='%s' -l mem_free=%s", RDIR="/usr/bin", hosts="*", ram_limit="5G"){
 	
 	src_file<-system.file("exec/cluster.script.sge.R", package="MeDeCom")
 	param_file<-file.path(WD, sprintf("%s_params.RDS", job_name))
@@ -673,8 +678,7 @@ submitClusterJob<-function(job_name, dependencies, params, WD, RDIR="/usr/bin", 
 	}else{
 		deps_string<-NULL
 	}
-	qsub_string<-sprintf("qsub -cwd -j y -o %s.log -b y -V -N %s -l h='%s' -l mem_free=%s", 
-										file.path(WD,job_name),	job_name, hosts,  ram_limit)
+	qsub_string<-sprintf(qsub_string, file.path(WD,job_name),	job_name, hosts,  ram_limit)
 	if(!is.null(deps_string)){
 		qsub_string<-paste(qsub_string, deps_string)
 	}
@@ -684,10 +688,10 @@ submitClusterJob<-function(job_name, dependencies, params, WD, RDIR="/usr/bin", 
 	res<-system(job_cmd, intern=TRUE)
 }
 #######################################################################################################################
-waitForClusterJobs<-function(analysis_id, lookup_int=10, verbose=TRUE){
+waitForClusterJobs<-function(analysis_id, lookup_int=10, verbose=TRUE, qstat_string="qstat -r | grep \"Full jobname\" | grep -e %s"){
 	
 	repeat{
-		lookup_cmd<-sprintf("qstat -r | grep \"Full jobname\" | grep -e %s", analysis_id)
+		lookup_cmd<-sprintf(qstat_string, analysis_id)
 		suppressWarnings({
 			running_jobs<-system(lookup_cmd, intern=TRUE)
 		})
