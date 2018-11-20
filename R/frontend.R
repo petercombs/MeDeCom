@@ -685,6 +685,7 @@ submitClusterJob<-function(job_name, dependencies, params, WD, qsub_string="qsub
 	script_string<-sprintf("%s/Rscript %s %s", RDIR, src_file, param_file)
 	
 	job_cmd<-paste(qsub_string, "'" , script_string, "'")
+    cat( paste(job_cmd, '\n') )
 	res<-system(job_cmd, intern=TRUE)
 }
 #######################################################################################################################
