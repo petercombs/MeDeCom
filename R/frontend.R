@@ -32,7 +32,7 @@
 #' @param temp.dir  a temporary directory for the cluster-based analysis available on all nodes
 #' @param cleanup	if \code{TRUE} the temporary directory will be removed on completion
 #' @param verbosity verbosity level, \code{0} for the quiet execution 
-#' @param qsub_string Cluster submission string (4 positions for log file, job name, h, and mem_free)
+#' @param cluster.type sge or slurm
 #' @param qstat_string Cluster status string (one position for job name)
 #' @param time.stamps add timestamps to the diagnostic output
 #' 
@@ -68,8 +68,7 @@ runMeDeCom<-function(
 		temp.dir=NULL,
 		cleanup=TRUE,
 		verbosity=1L,
-        qsub_string="sbatch -o %s.log.o --job-name %s --nodelist %s --mem %s --wrap",
-        qstat_string="squeue --name %s --noheader",
+        cluster.type='sge',
 		time.stamps=FALSE
 ){
 	ts<-function(){
@@ -447,11 +446,11 @@ runMeDeCom<-function(
 			id<-attr(run_param_list[[idx]], "jname")
 			deps<-attr(run_param_list[[idx]], "depends_on")
 			submitClusterJob(id, deps, run_param_list[idx], WD, 
-                             qsub_string=qsub_string,
+                             cluster.type=cluster.type,
 					RDIR=cluster.settings$R_bin_dir, hosts=cluster.settings$host_pattern, ram_limit=cluster.settings$mem_limit)
 		}
 		
-		waitForClusterJobs(analysis.name, qstat_string=qstat_string, verbose=verbosity>0L)
+		waitForClusterJobs(analysis.name, cluster.type=cluster.type, verbose=verbosity>0L)
 		
 		for(idx in 1:length(result_list)){
 			if(!is.null(result_list[[idx]]) && file.exists(file.path(WD, result_list[[idx]]))){
@@ -666,31 +665,53 @@ runMeDeCom<-function(
 	MeDeComSet(result_object$parameters, result_object$outputs, dataset_info)
 }
 #######################################################################################################################
-submitClusterJob<-function(job_name, dependencies, params, WD, qsub_string="qsub -cwd -j y -o %s.log -b y -V -N %s -l h='%s' -l mem_free=%s", RDIR="/usr/bin", hosts="*", ram_limit="5G"){
-	
-	src_file<-system.file("exec/cluster.script.sge.R", package="MeDeCom")
-	param_file<-file.path(WD, sprintf("%s_params.RDS", job_name))
-	saveRDS(params, param_file)
-	
-	if(!is.null(dependencies)){
-		deps<-paste(dependencies, collapse=",")
-		deps_string<-sprintf("-hold_jid '%s'", deps)
-	}else{
-		deps_string<-NULL
-	}
-	qsub_string<-sprintf(qsub_string, file.path(WD,job_name),	job_name, hosts,  ram_limit)
-	if(!is.null(deps_string)){
-		qsub_string<-paste(qsub_string, deps_string)
-	}
-	script_string<-sprintf("%s/Rscript %s %s", RDIR, src_file, param_file)
-	
-	job_cmd<-paste(qsub_string, "'" , script_string, "'")
-    cat( paste(job_cmd, '\n') )
-	res<-system(job_cmd, intern=TRUE)
+submitClusterJob<-function(job_name, dependencies, params, WD, cluster.type='sge', RDIR="/usr/bin", hosts="*", ram_limit="5G"){
+
+    src_file<-system.file("exec/cluster.script.sge.R", package="MeDeCom")
+    param_file<-file.path(WD, sprintf("%s_params.RDS", job_name))
+    saveRDS(params, param_file)
+
+    if (cluster.type=='sge'){
+        qsub_string <- "qsub -cwd -j y -o %s.log -b y -V -N %s -l h='%s' -l mem_free=%s"
+        qsub_string <- sprintf(qsub_string, file.path(WD,job_name),	job_name, hosts,  ram_limit)
+
+        if(!is.null(dependencies)){
+            deps<-paste(dependencies, collapse=",")
+            deps_string<-sprintf("-hold_jid '%s'", deps)
+        }else{
+            deps_string<-NULL
+        }
+        if(!is.null(deps_string)){
+            qsub_string<-paste(qsub_string, deps_string)
+        }
+        script_string<-sprintf("%s/Rscript %s %s", RDIR, src_file, param_file)
+
+        job_cmd<-paste(qsub_string, "'" , script_string, "'")
+        cat( paste(job_cmd, '\n') )
+        res<-system(job_cmd, intern=TRUE)
+    }else if (cluster.type == 'slurm'){
+        slurm_string <- 'sbatch --output %s --job-name %s --partition %s --mem %s'
+        slurm_string <- sprintf(slurm_string, file.path(WD, job_name), job_name, hosts, ram_limit)
+
+        if (!is.null(dependencies)){
+            deps <- paste(dependencies, collapse=',afterok:')
+            deps_string <- sprintf('--dependency afterok:%s', deps)
+            slurm_string <- paste(slurm_string, deps_string)
+        }
+
+        script_string<-sprintf("%s/Rscript %s %s", RDIR, src_file, param_file)
+
+        job_cmd <- sprintf("%s --wrap '%s'", slurm_string, script_string)
+        cat(paste(job_cmd, '\n'))
+        res<-system(job_cmd, intern=TRUE)
+    }
 }
 #######################################################################################################################
-waitForClusterJobs<-function(analysis_id, lookup_int=10, verbose=TRUE, qstat_string="qstat -r | grep \"Full jobname\" | grep -e %s"){
-	
+waitForClusterJobs<-function(analysis_id, lookup_int=10, verbose=TRUE, cluster.type='sge'){
+    if (cluster.type == "sge")
+        qstat_string="qstat -r | grep \"Full jobname\" | grep -e %s"
+    else
+        qstat_string = "squeue --noheader --name %s"
 	repeat{
 		lookup_cmd<-sprintf(qstat_string, analysis_id)
 		suppressWarnings({
