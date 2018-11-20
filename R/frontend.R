@@ -68,8 +68,8 @@ runMeDeCom<-function(
 		temp.dir=NULL,
 		cleanup=TRUE,
 		verbosity=1L,
-        qsub_string="qsub -cwd -j y -o %s.log -b y -V -N %s -l h='%s' -l mem_free=%s",
-        qstat_string="qstat -r | grep \"Full jobname\" | grep -e %s",
+        qsub_string="sbatch -o %s.log.o --job-name %s --nodelist %s --mem %s --wrap",
+        qstat_string="squeue --name %s --noheader",
 		time.stamps=FALSE
 ){
 	ts<-function(){
@@ -684,7 +684,7 @@ submitClusterJob<-function(job_name, dependencies, params, WD, qsub_string="qsub
 	}
 	script_string<-sprintf("%s/Rscript %s %s", RDIR, src_file, param_file)
 	
-	job_cmd<-paste(qsub_string, script_string)
+	job_cmd<-paste(qsub_string, "'" , script_string, "'")
 	res<-system(job_cmd, intern=TRUE)
 }
 #######################################################################################################################
